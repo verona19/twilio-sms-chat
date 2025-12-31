@@ -1,5 +1,6 @@
 // index.js
 require("dotenv").config();
+
 const express = require("express");
 const bodyParser = require("body-parser");
 const twilio = require("twilio");
@@ -13,8 +14,7 @@ app.use(express.json({ limit: "10mb" }));
 
 // --- In-memory storage (variant 1)
 const store = {
-  // messages: [{ id, from, to, body, direction, at }]
-  messages: [],
+  messages: [], // [{ id, from, to, body, direction, at }]
 };
 
 function normalizePhone(p) {
@@ -23,12 +23,11 @@ function normalizePhone(p) {
 
 function upsertMessage(msg) {
   store.messages.push(msg);
-  // optional: limit memory so it won't grow forever
+  // keep memory bounded
   if (store.messages.length > 2000) store.messages.shift();
 }
 
 function listContacts() {
-  // contacts are unique "other side" numbers extracted from messages
   const set = new Set();
   for (const m of store.messages) {
     const other =
@@ -48,7 +47,7 @@ function getThread(phone) {
     .sort((a, b) => new Date(a.at) - new Date(b.at));
 }
 
-// --- Serve static UI (optional but handy)
+// --- Serve static UI
 app.use(express.static(path.join(__dirname, "public")));
 
 // --- Health check
@@ -56,9 +55,8 @@ app.get("/health", (req, res) => res.json({ ok: true }));
 
 /**
  * TWILIO WEBHOOK: incoming SMS/MMS
- * IMPORTANT:
- * In Twilio Phone Number -> Messaging -> "A MESSAGE COMES IN"
- * Set to: https://YOUR-RENDER-URL/sms
+ * Twilio -> Phone Number (or Messaging Service) -> "A message comes in"
+ * URL: https://YOUR-RENDER-URL/sms
  * Method: POST
  */
 app.post("/sms", (req, res) => {
@@ -89,12 +87,10 @@ app.get("/api/contacts", (req, res) => {
 // --- API: messages (all or by phone thread)
 app.get("/api/messages", (req, res) => {
   const phone = req.query.phone;
-  if (phone) {
-    return res.json({ messages: getThread(phone) });
-  }
-  // return last 200 messages
-  const last = store.messages.slice(-200);
-  res.json({ messages: last });
+  if (phone) return res.json({ messages: getThread(phone) });
+
+  // last 200 messages
+  res.json({ messages: store.messages.slice(-200) });
 });
 
 // --- API: send outbound SMS from UI
@@ -106,7 +102,11 @@ app.post("/api/send", async (req, res) => {
     if (!to) return res.status(400).json({ ok: false, error: "Missing 'to'" });
     if (!body) return res.status(400).json({ ok: false, error: "Missing 'body'" });
 
-    const { TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_PHONE_NUMBER } = process.env;
+    const {
+      TWILIO_ACCOUNT_SID,
+      TWILIO_AUTH_TOKEN,
+      TWILIO_PHONE_NUMBER,
+    } = process.env;
 
     if (!TWILIO_ACCOUNT_SID || !TWILIO_AUTH_TOKEN || !TWILIO_PHONE_NUMBER) {
       return res.status(500).json({
@@ -124,7 +124,7 @@ app.post("/api/send", async (req, res) => {
       body,
     });
 
-    // Save outbound message to store
+    // Save outbound message
     upsertMessage({
       id: sent.sid || "out_" + Date.now(),
       from: normalizePhone(TWILIO_PHONE_NUMBER),
@@ -140,27 +140,14 @@ app.post("/api/send", async (req, res) => {
   }
 });
 
-// --- Fallback to UI (single page)
-app.get("*", (req, res) => {
-  res.sendFile(path.join(__dirname, "public", "index.html"));
-});
-
-// --- Start
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log("Server running on port", PORT));
-
-
-
-
-
-
-// TEMP: add fake inbound message (remove later!)
+// --- DEBUG: add fake inbound message (for testing without phone)
+// Remove later.
 app.get("/debug/add", (req, res) => {
   const from = (req.query.from || "+10000000000").toString();
   const to = (req.query.to || process.env.TWILIO_PHONE_NUMBER || "+19999999999").toString();
   const body = (req.query.body || "Test inbound message").toString();
 
-  store.messages.push({
+  upsertMessage({
     id: "dbg_" + Date.now(),
     from,
     to,
@@ -169,6 +156,14 @@ app.get("/debug/add", (req, res) => {
     at: new Date().toISOString(),
   });
 
-  res.json({ ok: true, added: { from, to, body }, contacts: store.messages.length });
+  res.json({ ok: true, added: { from, to, body }, total: store.messages.length });
 });
 
+// --- Fallback to UI (single page) MUST BE LAST
+app.get("*", (req, res) => {
+  res.sendFile(path.join(__dirname, "public", "index.html"));
+});
+
+// --- Start
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log("Server running on port", PORT));
