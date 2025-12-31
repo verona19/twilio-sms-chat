@@ -1,64 +1,123 @@
-<!DOCTYPE html>
+<!doctype html>
 <html>
-<head>
-  <meta charset="UTF-8" />
-  <title>SMS Chat</title>
-  <style>
-    body { font-family: Arial; display: flex; height: 100vh; margin: 0; }
-    #contacts { width: 30%; border-right: 1px solid #ddd; padding: 10px; }
-    #chat { width: 70%; display: flex; flex-direction: column; }
-    #messages { flex: 1; padding: 10px; overflow-y: auto; }
-    #input { display: flex; }
-    input, button { padding: 10px; }
-  </style>
-</head>
-<body>
-  <div id="contacts">
-    <h3>Contacts</h3>
-    <div id="contactList"></div>
-  </div>
-
-  <div id="chat">
-    <div id="messages"></div>
-    <div id="input">
-      <input id="text" placeholder="Type message..." style="flex:1"/>
-      <button onclick="send()">Send</button>
+  <head>
+    <meta charset="utf-8" />
+    <title>Twilio SMS Chat (Simple)</title>
+    <style>
+      body { font-family: Arial, sans-serif; margin: 0; }
+      .wrap { display: flex; height: 100vh; }
+      .left { width: 260px; border-right: 1px solid #ddd; padding: 12px; overflow:auto; }
+      .right { flex: 1; display:flex; flex-direction:column; }
+      .msgs { flex:1; padding: 12px; overflow:auto; }
+      .bar { display:flex; gap:8px; padding: 12px; border-top: 1px solid #ddd; }
+      input, textarea { width: 100%; }
+      button { padding: 8px 12px; }
+      .contact { padding: 8px; border-radius: 8px; cursor:pointer; }
+      .contact:hover { background:#f5f5f5; }
+      .active { background:#eaeaea; }
+      .msg { margin: 8px 0; }
+      .in { text-align:left; }
+      .out { text-align:right; }
+      .bubble { display:inline-block; padding:10px; border-radius:12px; background:#f3f3f3; max-width:70%; }
+      .out .bubble { background:#dff3ff; }
+      .meta { font-size: 12px; color:#777; margin-top:4px; }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="left">
+        <h3>Contacts</h3>
+        <div id="contacts"></div>
+      </div>
+      <div class="right">
+        <div class="msgs" id="msgs"></div>
+        <div class="bar">
+          <input id="to" placeholder="To phone (E.164), e.g. +1..." />
+          <input id="text" placeholder="Type message..." />
+          <button id="send">Send</button>
+        </div>
+      </div>
     </div>
-  </div>
 
-<script>
-let current = null;
+    <script>
+      let activePhone = "";
 
-async function load() {
-  const res = await fetch('/messages');
-  const data = await res.json();
+      async function loadContacts() {
+        const r = await fetch("/api/contacts");
+        const data = await r.json();
+        const box = document.getElementById("contacts");
+        box.innerHTML = "";
+        (data.contacts || []).forEach(p => {
+          const div = document.createElement("div");
+          div.className = "contact" + (p === activePhone ? " active" : "");
+          div.textContent = p;
+          div.onclick = () => {
+            activePhone = p;
+            document.getElementById("to").value = p;
+            loadContacts();
+            loadThread();
+          };
+          box.appendChild(div);
+        });
+      }
 
-  const contacts = [...new Set(data.map(m => m.from))];
-  document.getElementById('contactList').innerHTML =
-    contacts.map(c => `<div onclick="openChat('${c}')">${c}</div>`).join('');
-}
+      function renderMsgs(messages) {
+        const box = document.getElementById("msgs");
+        box.innerHTML = "";
+        messages.forEach(m => {
+          const row = document.createElement("div");
+          row.className = "msg " + (m.direction === "inbound" ? "in" : "out");
 
-async function openChat(from) {
-  current = from;
-  const res = await fetch('/messages');
-  const data = await res.json();
-  document.getElementById('messages').innerHTML =
-    data.filter(m => m.from === from)
-        .map(m => `<div>${m.body}</div>`).join('');
-}
+          const bub = document.createElement("div");
+          bub.className = "bubble";
+          bub.textContent = m.body || "";
 
-async function send() {
-  const text = document.getElementById('text').value;
-  await fetch('/send', {
-    method: 'POST',
-    headers: {'Content-Type':'application/json'},
-    body: JSON.stringify({ to: current, body: text })
-  });
-  document.getElementById('text').value = '';
-  openChat(current);
-}
+          const meta = document.createElement("div");
+          meta.className = "meta";
+          meta.textContent = `${m.direction} • ${new Date(m.at).toLocaleString()}`;
 
-load();
-</script>
-</body>
+          row.appendChild(bub);
+          row.appendChild(meta);
+          box.appendChild(row);
+        });
+        box.scrollTop = box.scrollHeight;
+      }
+
+      async function loadThread() {
+        if (!activePhone) { renderMsgs([]); return; }
+        const r = await fetch("/api/messages?phone=" + encodeURIComponent(activePhone));
+        const data = await r.json();
+        renderMsgs(data.messages || []);
+      }
+
+      async function send() {
+        const to = document.getElementById("to").value.trim();
+        const body = document.getElementById("text").value.trim();
+        if (!to || !body) return;
+
+        const r = await fetch("/api/send", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ to, body })
+        });
+        const data = await r.json();
+        if (!data.ok) alert(data.error || "Send failed");
+
+        document.getElementById("text").value = "";
+        activePhone = to;
+        await loadContacts();
+        await loadThread();
+      }
+
+      document.getElementById("send").onclick = send;
+
+      // auto-refresh
+      setInterval(async () => {
+        await loadContacts();
+        await loadThread();
+      }, 2000);
+
+      loadContacts();
+    </script>
+  </body>
 </html>
