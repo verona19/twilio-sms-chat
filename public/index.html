@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <title>SMS Chat</title>
+  <style>
+    body { font-family: Arial; display: flex; height: 100vh; margin: 0; }
+    #contacts { width: 30%; border-right: 1px solid #ddd; padding: 10px; }
+    #chat { width: 70%; display: flex; flex-direction: column; }
+    #messages { flex: 1; padding: 10px; overflow-y: auto; }
+    #input { display: flex; }
+    input, button { padding: 10px; }
+  </style>
+</head>
+<body>
+  <div id="contacts">
+    <h3>Contacts</h3>
+    <div id="contactList"></div>
+  </div>
+
+  <div id="chat">
+    <div id="messages"></div>
+    <div id="input">
+      <input id="text" placeholder="Type message..." style="flex:1"/>
+      <button onclick="send()">Send</button>
+    </div>
+  </div>
+
+<script>
+let current = null;
+
+async function load() {
+  const res = await fetch('/messages');
+  const data = await res.json();
+
+  const contacts = [...new Set(data.map(m => m.from))];
+  document.getElementById('contactList').innerHTML =
+    contacts.map(c => `<div onclick="openChat('${c}')">${c}</div>`).join('');
+}
+
+async function openChat(from) {
+  current = from;
+  const res = await fetch('/messages');
+  const data = await res.json();
+  document.getElementById('messages').innerHTML =
+    data.filter(m => m.from === from)
+        .map(m => `<div>${m.body}</div>`).join('');
+}
+
+async function send() {
+  const text = document.getElementById('text').value;
+  await fetch('/send', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ to: current, body: text })
+  });
+  document.getElementById('text').value = '';
+  openChat(current);
+}
+
+load();
+</script>
+</body>
+</html>
