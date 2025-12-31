@@ -4,26 +4,77 @@ const twilio = require("twilio");
 
 const app = express();
 
-// Для Twilio webhook (SMS/MMS)
-app.use(bodyParser.urlencoded({ extended: false }));
-app.use(express.json({ limit: "10mb" }));
+// --- Middleware ---
+app.use(bodyParser.urlencoded({ extended: false })); // Twilio webhook form-encoded
+app.use(express.json({ limit: "10mb" }));            // JSON for /send
+app.use(express.static("public"));                   // <-- ВАЖЛИВО: віддає public/index.html
 
-// Webhook: вхідні SMS / MMS
+// --- In-memory storage (MVP) ---
+const messages = [];
+
+// --- Twilio client for sending ---
+const client = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+
+// --- Webhook: incoming SMS/MMS from Twilio ---
 app.post("/sms", (req, res) => {
-  const twiml = new twilio.twiml.MessagingResponse();
+  const from = req.body.From;
+  const body = req.body.Body || "";
+  const numMedia = parseInt(req.body.NumMedia || "0", 10);
 
-  // Можеш змінити текст відповіді пізніше
-  twiml.message("Got it ✅ You can continue texting here.");
+  const mediaUrls = [];
+  for (let i = 0; i < numMedia; i++) {
+    mediaUrls.push(req.body[`MediaUrl${i}`]);
+  }
 
-  res.type("text/xml").send(twiml.toString());
+  messages.push({
+    from,
+    body,
+    mediaUrls,
+    direction: "inbound",
+    at: new Date().toISOString(),
+  });
+
+  // Twilio expects TwiML response
+  res.type("text/xml").send("<Response/>");
 });
 
-// Health check
+// --- API: list messages for UI ---
+app.get("/messages", (req, res) => {
+  res.json(messages);
+});
+
+// --- API: send message from UI ---
+app.post("/send", async (req, res) => {
+  try {
+    const to = req.body.to;
+    const body = req.body.body;
+
+    if (!to || !body) return res.status(400).json({ error: "Missing to/body" });
+
+    await client.messages.create({
+      from: process.env.TWILIO_PHONE_NUMBER,
+      to,
+      body,
+    });
+
+    messages.push({
+      from: to,
+      body,
+      mediaUrls: [],
+      direction: "outbound",
+      at: new Date().toISOString(),
+    });
+
+    res.sendStatus(200);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// --- Make / open chat UI ---
 app.get("/", (req, res) => {
-  res.send("Twilio SMS/MMS chat server is running ✅");
+  res.redirect("/index.html");
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-});
+app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
