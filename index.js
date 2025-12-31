@@ -148,3 +148,27 @@ app.get("*", (req, res) => {
 // --- Start
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log("Server running on port", PORT));
+
+
+
+
+
+
+// TEMP: add fake inbound message (remove later!)
+app.get("/debug/add", (req, res) => {
+  const from = (req.query.from || "+10000000000").toString();
+  const to = (req.query.to || process.env.TWILIO_PHONE_NUMBER || "+19999999999").toString();
+  const body = (req.query.body || "Test inbound message").toString();
+
+  store.messages.push({
+    id: "dbg_" + Date.now(),
+    from,
+    to,
+    body,
+    direction: "inbound",
+    at: new Date().toISOString(),
+  });
+
+  res.json({ ok: true, added: { from, to, body }, contacts: store.messages.length });
+});
+
